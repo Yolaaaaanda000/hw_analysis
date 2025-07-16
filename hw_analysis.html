@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Analysis (CSV/Excel) - Corrected</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        h1, h2 { color: #333; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 2em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .wrong { background-color: #ffdddd; }
+        #file-input { margin-bottom: 1em; }
+        #wrong-answers-summary td:nth-child(2) { 
+            max-width: 400px; 
+            word-wrap: break-word; 
+            white-space: normal; 
+        }
+        #sort-select {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        #sort-select:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,.25);
+        }
+        .save-btn:hover {
+            transform: translateY(-1px);
+            transition: all 0.2s ease;
+        }
+        .save-btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Test Analysis</h1>
+    <p>Upload your CSV or Excel file to see the analysis.</p>
+    <input type="file" id="file-input" accept=".csv, .xlsx, .xls">
+    <button id="analyze-button">Analyze</button>
+    <button id="save-image-button" class="save-btn" style="display: none; margin-left: 10px; padding: 8px 16px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">Save Full Report</button>
+    <button id="save-scores-button" class="save-btn" style="display: none; margin-left: 10px; padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">仅保存分数图片</button>
+
+    <div id="results" style="display: none;">
+        <div id="student-scores-section">
+            <h2>Student Scores</h2>
+            <div style="margin-bottom:10px;">
+                <button id="batch-edit-labels-btn" style="padding:6px 14px; background:#007bff; color:#fff; border:none; border-radius:4px; cursor:pointer;">批量编辑题号</button>
+                <button id="update-all-labels-btn" style="padding:6px 14px; background:#28a745; color:#fff; border:none; border-radius:4px; cursor:pointer; margin-left:10px;">更新所有题号</button>
+            </div>
+            <p>Here you can see the scores of each student for each question. Incorrect answers (score of 0) are highlighted in red.</p>
+            <div id="student-scores"></div>
+        </div>
+
+        <h2>Wrong Answer Chart</h2>
+        <p>This chart shows the number of wrong answers for each question, helping teachers identify which questions were most challenging.</p>
+        <div style="width: 100%; height: 400px; margin: 20px 0;">
+            <canvas id="wrongAnswerChart"></canvas>
+        </div>
+
+        <h2>Wrong Answer Summary</h2>
+        <p>This table shows the questions that were answered incorrectly, and the number of students who got them wrong.</p>
+        <div style="margin-bottom: 15px;">
+            <label for="sort-select">Sort by: </label>
+            <select id="sort-select">
+                <option value="question-asc">Question Number (Ascending)</option>
+                <option value="question-desc">Question Number (Descending)</option>
+                <option value="wrong-asc">Number of Wrong Answers (Ascending)</option>
+                <option value="wrong-desc" selected>Number of Wrong Answers (Descending)</option>
+                <option value="original-order">Original HW Order</option>
+            </select>
+        </div>
+        <table id="wrong-answers-summary">
+            <thead>
+                <tr>
+                    <th>Question Number</th>
+                    <th>Question Text</th>
+                    <th>Number of Wrong Answers</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.getElementById('analyze-button').addEventListener('click', () => {
+            const fileInput = document.getElementById('file-input');
+            if (fileInput.files.length === 0) {
+                alert('Please select a file first.');
+                return;
+            }
+            const file = fileInput.files[0];
+            const fileName = file.name;
+            const fileExt = fileName.split('.').pop().toLowerCase();
+
+            const reader = new FileReader();
+
+            if (fileExt === 'csv') {
+                reader.onload = function(event) {
+                    const csvData = event.target.result;
+                    const parsedData = parseCSV(csvData);
+                    if(parsedData) {
+                        processData(parsedData);
+                        document.getElementById('results').style.display = 'block';
+                    }
+                };
+                reader.readAsText(file);
+            } else if (fileExt === 'xlsx' || fileExt === 'xls') {
+                reader.onload = function(event) {
+                    const arrayBuffer = event.target.result;
+                    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    if (jsonData.length > 1) {
+                        const header = jsonData[0];
+                        const data = jsonData.slice(1).map(rowArray => {
+                            const rowObject = {};
+                            header.forEach((h, i) => {
+                                rowObject[h] = rowArray[i];
+                            });
+                            return rowObject;
+                        });
+                        processData({ header, data });
+                        document.getElementById('results').style.display = 'block';
+                    } else {
+                        alert("The Excel file seems to be empty.");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                alert("Unsupported file type. Please upload a CSV or Excel file.");
+            }
+        });
+
+        function parseCSV(data) {
+            const rows = data.split('\n').map(row => row.trim()).filter(row => row.length > 0);
+            if (rows.length < 2) {
+                alert("CSV file is too small or empty.");
+                return null;
+            }
+            const header = rows[0].split(',').map(h => h.trim());
+            const dataRows = rows.slice(1).map(rowStr => {
+                const row = {};
+                const fields = rowStr.split(',');
+                header.forEach((h, i) => {
+                    row[h] = fields[i] ? fields[i].trim() : '';
+                });
+                return row;
+            });
+            return { header, data: dataRows };
+        }
+
+        function processData(parsedData) {
+            const { header, data } = parsedData;
+
+            const yourNameIndex = header.indexOf('Your Name');
+            if (yourNameIndex === -1) {
+                alert('"Your Name" column not found. The file format might be incorrect.');
+                return;
+            }
+            const questionCols = header.slice(yourNameIndex + 1);
+
+            let questionLabels = questionCols.map((_, i) => `Q${i + 1}`);
+            let originalOrder = questionCols.map((_, i) => i);
+            if (window._questionLabels && window._questionLabels.length === questionCols.length) {
+                questionLabels = window._questionLabels;
+            }
+            window._originalOrder = originalOrder;
+            
+            let batchDialog = null;
+
+            function showBatchEditDialog() {
+                if (batchDialog) batchDialog.remove();
+                batchDialog = document.createElement('div');
+                batchDialog.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.3);z-index:9999;display:flex;align-items:center;justify-content:center;';
+                batchDialog.innerHTML = `
+                    <div style="background:#fff;padding:24px 20px;border-radius:8px;min-width:320px;box-shadow:0 2px 12px rgba(0,0,0,0.15);">
+                        <h3 style="margin-top:0;">批量编辑题号</h3>
+                        <textarea id="batch-labels-input" style="width:100%;height:80px;font-size:15px;resize:vertical;">${questionLabels.join(', ')}</textarea>
+                        <div style="margin-top:12px;text-align:right;">
+                            <button id="batch-cancel-btn" style="margin-right:10px;padding:5px 14px;">取消</button>
+                            <button id="batch-apply-btn" style="background:#28a745;color:#fff;padding:5px 14px;border:none;border-radius:4px;">应用</button>
+                        </div>
+                        <div style="color:#888;font-size:13px;margin-top:8px;">支持逗号、空格或换行分隔</div>
+                    </div>
+                `;
+                document.body.appendChild(batchDialog);
+                document.getElementById('batch-cancel-btn').onclick = () => batchDialog.remove();
+                document.getElementById('batch-apply-btn').onclick = () => {
+                    let val = document.getElementById('batch-labels-input').value;
+                    function parseBatchInput(val) {
+                        let lines = val.split(/\n+/).map(l => l.trim()).filter(Boolean);
+                        let result = [];
+                        let label = '';
+                        function expandRange(str) {
+                            const rangeRegex = /^([A-Za-z]*)(\d+)-(?:[A-Za-z]*)(\d+)$/;
+                            const match = str.match(rangeRegex);
+                            if (match) {
+                                const prefix = match[1];
+                                const start = parseInt(match[2], 10);
+                                const end = parseInt(match[3], 10);
+                                if (end >= start) {
+                                    const arr = [];
+                                    for (let i = start; i <= end; i++) {
+                                        arr.push(prefix + i);
+                                    }
+                                    return arr;
+                                }
+                            }
+                            return [str];
+                        }
+                        lines.forEach(line => {
+                            let m = line.match(/^\[(.+?)\]\s*(.*)$/);
+                            if (m) {
+                                label = m[1].trim();
+                                line = m[2].trim();
+                            }
+                            if (!line) return;
+                            let arr = line.split(/[, \s]+/).map(s => s.trim()).filter(Boolean);
+                            arr.forEach(item => {
+                                expandRange(item).forEach(q => {
+                                    result.push({label, q});
+                                });
+                            });
+                        });
+                        return result;
+                    }
+                    let parsed = parseBatchInput(val);
+                    if (parsed.length !== questionCols.length) {
+                        alert(`题号数量（${parsed.length}）与题目数量（${questionCols.length}）不符！`);
+                        return;
+                    }
+                    questionLabels = parsed.map(x => x.q);
+                    window._questionLabels = questionLabels;
+                    window._questionLabelTags = parsed.map(x => x.label);
+                    batchDialog.remove();
+                    renderAll();
+                    updateLabels();
+                };
+            }
+            
+            document.getElementById('batch-edit-labels-btn').onclick = showBatchEditDialog;
+            
+            function renderAll() {
+                const studentScoresContainer = document.getElementById('student-scores');
+                let studentTable = '<table><thead><tr><th>Student Name</th>';
+                questionLabels.forEach((label, i) => {
+                    if (!questionCols[i]) return;
+                    studentTable += `<th><input type="text" value="${label}" data-idx="${i}" style="width:60px;text-align:center;" class="question-label-input"></th>`;
+                });
+                studentTable += '</tr></thead><tbody>';
+                let tags = window._questionLabelTags || [];
+                studentTable += '<tr><th></th>';
+                questionLabels.forEach((label, i) => {
+                    if (!questionCols[i]) return;
+                    let tag = tags[i] ? `<div style="font-size:12px;color:#888;">${tags[i]}</div>` : '';
+                    studentTable += `<th style="font-weight:normal;">${tag}</th>`;
+                });
+                studentTable += '</tr>';
+                data.forEach(student => {
+                    studentTable += '<tr>';
+                    const studentName = student['Your Name'] || student['用户ID'] || 'Unknown';
+                    studentTable += `<td>${studentName}</td>`;
+                    questionCols.forEach((q, idx) => {
+                         if (!q) return;
+                        const score = parseInt(student[q], 10);
+                        studentTable += `<td class="${score === 0 ? 'wrong' : ''}">${isNaN(score) ? 'N/A' : score}</td>`;
+                    });
+                    studentTable += '</tr>';
+                });
+                studentTable += '</tbody></table>';
+                studentScoresContainer.innerHTML = studentTable;
+                
+                document.querySelectorAll('.question-label-input').forEach(input => {
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            input.blur();
+                        }
+                    });
+                    input.addEventListener('change', () => {
+                         if(window._updateLabels) {
+                            window._updateLabels();
+                         }
+                    });
+                });
+            }
+
+            function updateLabels() {
+                questionLabels = Array.from(document.querySelectorAll('.question-label-input')).map(input => input.value.trim() || input.defaultValue);
+                window._questionLabels = questionLabels;
+                let tags = window._questionLabelTags || [];
+                if (tags.length < questionLabels.length) {
+                    tags = tags.concat(Array(questionLabels.length - tags.length).fill(''));
+                } else if (tags.length > questionLabels.length) {
+                    tags = tags.slice(0, questionLabels.length);
+                }
+                window._questionLabelTags = tags;
+                
+                populateWrongAnswerTable(getWrongAnswerCounts());
+                createWrongAnswerChart(getWrongAnswerCounts(), data.length);
+            }
+
+            function getWrongAnswerCounts() {
+                const wrongAnswerCounts = {};
+                questionCols.forEach((col, index) => {
+                    if (!col) return;
+                    let wrong_count = 0;
+                    let wrong_students = new Set();
+                    data.forEach(row => {
+                        if(parseInt(row[col], 10) === 0) {
+                            wrong_count++;
+                            wrong_students.add(row['Your Name'] || row['ID'] || 'Unknown');
+                        }
+                    });
+                    wrongAnswerCounts[questionLabels[index]] = {
+                        "question_text": col,
+                        "wrong_count": wrong_count,
+                        "wrong_students_count": wrong_students.size
+                    };
+                });
+                return wrongAnswerCounts;
+            }
+            
+            window._updateLabels = updateLabels;
+
+            renderAll();
+            populateWrongAnswerTable(getWrongAnswerCounts());
+            createWrongAnswerChart(getWrongAnswerCounts(), data.length);
+            
+            document.getElementById('sort-select').addEventListener('change', function() {
+                populateWrongAnswerTable(getWrongAnswerCounts());
+            });
+
+            document.getElementById('update-all-labels-btn').addEventListener('click', () => {
+                if(window._updateLabels){
+                    window._updateLabels();
+                }
+            });
+
+            document.getElementById('save-image-button').style.display = 'inline-block';
+            document.getElementById('save-scores-button').style.display = 'inline-block';
+        }
+
+        function populateWrongAnswerTable(wrongAnswerCounts) {
+            const wrongAnswersTbody = document.querySelector('#wrong-answers-summary tbody');
+            wrongAnswersTbody.innerHTML = '';
+            const sortOption = document.getElementById('sort-select').value;
+            let tags = window._questionLabelTags || [];
+            let labels = window._questionLabels || [];
+            let originalOrder = window._originalOrder || labels.map((_,i)=>i);
+            let questionsArray = Object.keys(wrongAnswerCounts).map((q, i) => ({
+                question: q,
+                question_text: wrongAnswerCounts[q].question_text,
+                wrong_count: wrongAnswerCounts[q].wrong_count,
+                wrong_students_count: wrongAnswerCounts[q].wrong_students_count,
+                idx: labels.indexOf(q),
+                originalIndex: originalOrder[labels.indexOf(q)]
+            }));
+            switch(sortOption) {
+                case 'question-asc':
+                    questionsArray.sort((a, b) => a.question.localeCompare(b.question, undefined, {numeric:true}));
+                    break;
+                case 'question-desc':
+                    questionsArray.sort((a, b) => b.question.localeCompare(a.question, undefined, {numeric:true}));
+                    break;
+                case 'wrong-asc':
+                    questionsArray.sort((a, b) => a.wrong_count - b.wrong_count);
+                    break;
+                case 'wrong-desc':
+                    questionsArray.sort((a, b) => b.wrong_count - a.wrong_count);
+                    break;
+                case 'original-order':
+                    questionsArray.sort((a, b) => a.originalIndex - b.originalIndex);
+                    break;
+            }
+            questionsArray.forEach(item => {
+                const row = document.createElement('tr');
+                let idx = labels.indexOf(item.question);
+                let tag = (tags[idx] ? `<div style="font-size:12px;color:#888;">${tags[idx]}</div>` : '');
+                row.innerHTML = `
+                    <td>${item.question}${tag}</td>
+                    <td>${item.question_text}</td>
+                    <td>${item.wrong_count}（${item.wrong_students_count}人）</td>
+                `;
+                wrongAnswersTbody.appendChild(row);
+            });
+        }
+
+        function createWrongAnswerChart(wrongAnswerCounts, totalStudents) {
+            const existingChart = Chart.getChart('wrongAnswerChart');
+            if (existingChart) {
+                existingChart.destroy();
+            }
+
+            const labels = [];
+            const data = [];
+            const colors = [];
+            let tags = window._questionLabelTags || [];
+            let qLabels = window._questionLabels || [];
+            const sortedQuestions = Object.keys(wrongAnswerCounts).sort((a, b) => {
+                return wrongAnswerCounts[b].wrong_count - wrongAnswerCounts[a].wrong_count;
+            });
+
+            let chartLabelMap = [];
+            sortedQuestions.forEach((question, index) => {
+                const wrongCount = wrongAnswerCounts[question].wrong_count;
+                let idx = qLabels.indexOf(question);
+                let tag = tags[idx] ? tags[idx] : '';
+                let label = tag ? `${question}\n${tag}` : question;
+                labels.push(label);
+                chartLabelMap.push({question, tag: tag});
+                data.push(wrongCount);
+                const errorRate = wrongCount / totalStudents;
+                if (errorRate > 0.5) {
+                    colors.push('rgba(255, 99, 132, 0.8)');
+                } else if (errorRate > 0.25) {
+                    colors.push('rgba(255, 205, 86, 0.8)');
+                } else {
+                    colors.push('rgba(75, 192, 192, 0.8)');
+                }
+            });
+
+            const ctx = document.getElementById('wrongAnswerChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Number of Wrong Answers',
+                        data: data,
+                        backgroundColor: colors,
+                        borderColor: colors.map(color => color.replace('0.8', '1')),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Wrong Answers'
+                            },
+                            ticks: {
+                                stepSize: 1
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Question Number'
+                            },
+                            ticks: {
+                                callback: function(value, index) {
+                                    return this.getLabelForValue(value).replace(/\n/g, '\n');
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Wrong Answer Distribution by Question',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label.replace(/\n/g, '\n');
+                                },
+                                afterLabel: function(context) {
+                                    let idx = context.dataIndex;
+                                    let q = chartLabelMap[idx]?.question || '';
+                                    let tag = chartLabelMap[idx]?.tag || '';
+                                    let lines = [];
+                                    if (tag) lines.push(`标签: ${tag}`);
+                                    const percentage = ((context.parsed.y / totalStudents) * 100).toFixed(1);
+                                    lines.push(`Error Rate: ${percentage}%`);
+                                    return lines;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- MODIFICATION: Refactored save function and added listeners ---
+        
+        // Setup listeners after analysis
+        document.getElementById('save-image-button').addEventListener('click', function() {
+            saveElementAsImage('results', 'full-report-');
+        });
+
+        document.getElementById('save-scores-button').addEventListener('click', function() {
+            saveElementAsImage('student-scores-section', 'student-scores-');
+        });
+
+        function saveElementAsImage(elementId, fileNamePrefix) {
+            const elementToCapture = document.getElementById(elementId);
+            if (!elementToCapture) {
+                console.error('Element not found for capture:', elementId);
+                alert('Error: Could not find the specified section to save.');
+                return;
+            }
+
+            const saveButtons = document.querySelectorAll('.save-btn');
+            
+            // Hide save buttons temporarily
+            saveButtons.forEach(btn => btn.style.display = 'none');
+            
+            // Show loading message
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading-message';
+            loadingDiv.style.cssText = `
+                position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.8); color: white; padding: 20px;
+                border-radius: 8px; z-index: 10000; font-size: 16px;
+            `;
+            loadingDiv.textContent = 'Generating image... Please wait...';
+            document.body.appendChild(loadingDiv);
+
+            const options = {
+                allowTaint: true, useCORS: true, scale: 2, backgroundColor: '#ffffff',
+                width: elementToCapture.scrollWidth, height: elementToCapture.scrollHeight,
+                scrollX: 0, scrollY: 0, windowWidth: elementToCapture.scrollWidth,
+                windowHeight: elementToCapture.scrollHeight
+            };
+
+            html2canvas(elementToCapture, options).then(function(canvas) {
+                document.body.removeChild(loadingDiv);
+                saveButtons.forEach(btn => btn.style.display = 'inline-block');
+                
+                const link = document.createElement('a');
+                link.download = fileNamePrefix + new Date().toISOString().slice(0, 10) + '.png';
+                link.href = canvas.toDataURL('image/png');
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }).catch(function(error) {
+                console.error('Error generating image:', error);
+                document.body.removeChild(loadingDiv);
+                saveButtons.forEach(btn => btn.style.display = 'inline-block');
+                alert('Error generating image. Please try again.');
+            });
+        }
+
+    </script>
+
+</body>
+</html>

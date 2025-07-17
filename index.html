@@ -167,7 +167,12 @@
         function processData(parsedData) {
             const { header, data } = parsedData;
 
-            const yourNameIndex = header.indexOf('Your Name');
+            // const yourNameIndex = header.indexOf('Your Name');
+            // if (yourNameIndex === -1) {
+            //     alert('"Your Name" column not found. The file format might be incorrect.');
+            //     return;
+            
+            const yourNameIndex = header.findIndex(col => col.toLowerCase().includes('your name'));
             if (yourNameIndex === -1) {
                 alert('"Your Name" column not found. The file format might be incorrect.');
                 return;

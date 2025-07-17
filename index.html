@@ -14,8 +14,8 @@
         body { font-family: sans-serif; margin: 2em; }
         h1, h2 { color: #333; }
         table { border-collapse: collapse; width: 100%; margin-bottom: 2em; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
+        th { background-color: #f2f2f2; font-size: 16px; text-align: left; padding: 8px; }
+        td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; }
         .wrong { background-color: #ffdddd; }
         #file-input { margin-bottom: 1em; }
         #wrong-answers-summary td:nth-child(2) { 
@@ -55,7 +55,8 @@
 
     <div id="results" style="display: none;">
         <div id="student-scores-section">
-            <h2>Student Scores</h2>
+            <h2 style="display:inline-block;">Student Scores</h2>
+            <input id="hw-title-input" type="text" placeholder="输入作业标题" style="margin-left:16px;font-size:16px;padding:4px 8px;width:260px;vertical-align:middle;">
             <div style="margin-bottom:10px;">
                 <button id="batch-edit-labels-btn" style="padding:6px 14px; background:#007bff; color:#fff; border:none; border-radius:4px; cursor:pointer;">批量编辑题号</button>
                 <button id="update-all-labels-btn" style="padding:6px 14px; background:#28a745; color:#fff; border:none; border-radius:4px; cursor:pointer; margin-left:10px;">更新所有题号</button>
@@ -143,6 +144,25 @@
                 reader.readAsArrayBuffer(file);
             } else {
                 alert("Unsupported file type. Please upload a CSV or Excel file.");
+            }
+        });
+
+        document.getElementById('file-input').addEventListener('change', function() {
+            const fileInput = this;
+            if (fileInput.files.length > 0) {
+                const fileName = fileInput.files[0].name;
+                // 自动提取标题
+                const matches = fileName.match(/_(.*?)_/g);
+                if (matches && matches.length >= 2) {
+                    // 取第二个_到倒数第二个_之间的内容
+                    const startIdx = fileName.indexOf('_', fileName.indexOf('_') + 1) + 1;
+                    const endIdx = fileName.lastIndexOf('_');
+                    if (startIdx > 0 && endIdx > startIdx) {
+                        const title = fileName.substring(startIdx, endIdx);
+                        const hwTitleInput = document.getElementById('hw-title-input');
+                        if (hwTitleInput) hwTitleInput.value = title;
+                    }
+                }
             }
         });
 
@@ -264,38 +284,77 @@
             
             function renderAll() {
                 const studentScoresContainer = document.getElementById('student-scores');
-                let studentTable = '<table><thead><tr><th>Student Name</th>';
-                questionLabels.forEach((label, i) => {
-                    if (!questionCols[i]) return;
-                    studentTable += `<th><input type="text" value="${label}" data-idx="${i}" style="width:60px;text-align:center;" class="question-label-input"></th>`;
+                // 获取所有学生姓名
+                const nameField = header.find(col => col && col.toLowerCase().includes('your name'));
+                const studentNames = data.map(student => nameField ? student[nameField] : 'Unknown');
+                // 表头：题号、题目内容、标签、错题人数、学生姓名...
+                let studentTable = '<table style="table-layout:fixed;width:100%;"><colgroup>';
+                studentTable += '<col style="width:50px;">'; // 题号
+                studentTable += '<col style="width:160px;">'; // 题目内容
+                studentTable += '<col style="width:50px;">'; // 标签
+                studentTable += '<col style="width:50px;">'; // 错题人数
+                studentNames.forEach(() => {
+                    studentTable += '<col style="width:60px;">'; // 每个学生
+                });
+                studentTable += '</colgroup>';
+                studentTable += '<thead><tr>';
+                studentTable += '<th>题号</th><th>题目内容</th><th>标签</th><th>错题人数</th>';
+                studentNames.forEach(name => {
+                    studentTable += `<th>${name}</th>`;
                 });
                 studentTable += '</tr></thead><tbody>';
+                // 每道题为一行
                 let tags = window._questionLabelTags || [];
-                studentTable += '<tr><th></th>';
                 questionLabels.forEach((label, i) => {
                     if (!questionCols[i]) return;
+                    // 题号
+                    studentTable += `<tr><td><input type="text" value="${label}" data-idx="${i}" style="width:60px;text-align:center;border:1px solid #dee2e6;border-radius:2px;font-size:14px;" class="question-label-input"></td>`;
+                    // 题目内容
+                    let questionText = questionCols[i] ? String(questionCols[i]).slice(0, 30) : '';
+                    let showEllipsis = questionCols[i] && String(questionCols[i]).length > 30;
+                    studentTable += `<td style="width:140px;max-width:160px;overflow:hidden;white-space:normal;word-break:break-all;font-size:16px;background:#fff;color:#333;">${questionText}${showEllipsis ? '…' : ''}</td>`;
+                    // 标签
                     let tag = tags[i] ? `<div style="font-size:12px;color:#888;">${tags[i]}</div>` : '';
-                    studentTable += `<th style="font-weight:normal;">${tag}</th>`;
-                });
-                studentTable += '</tr>';
-                // 1. 先查找姓名字段名（只查一次）
-                const nameField = header.find(col => col && col.toLowerCase().includes('your name'));
-
-                // 2. 渲染时用 nameField
-                data.forEach(student => {
-                    studentTable += '<tr>';
-                    const studentName = nameField ? student[nameField] : 'Unknown';
-                    studentTable += `<td>${studentName}</td>`;
-                    questionCols.forEach((q, idx) => {
-                         if (!q) return;
-                        const score = parseInt(student[q], 10);
-                        studentTable += `<td class="${score === 0 ? 'wrong' : ''}">${isNaN(score) ? 'N/A' : score}</td>`;
+                    studentTable += `<td style="font-weight:normal;">${tag}</td>`;
+                    // 错题人数及颜色
+                    let wrongCount = 0;
+                    data.forEach(row => {
+                        if (parseInt(row[questionCols[i]], 10) === 0) wrongCount++;
+                    });
+                    let errorRate = data.length > 0 ? wrongCount / data.length : 0;
+                    let wrongColor = '';
+                    if (wrongCount === 0) {
+                        wrongColor = 'background:#fff;color:#333;';
+                    } else if (errorRate > 0 && errorRate <= 0.25) {
+                        wrongColor = 'background:rgba(75,192,192,0.8);color:#fff;';
+                    } else if (errorRate > 0.25 && errorRate <= 0.5) {
+                        wrongColor = 'background:rgba(255,205,86,0.8);color:#333;';
+                    } else if (errorRate > 0.5) {
+                        wrongColor = 'background:rgba(255,99,132,0.8);color:#fff;';
+                    }
+                    studentTable += `<td style="font-size:12px;${wrongColor}">${wrongCount}</td>`;
+                    // 各学生得分
+                    data.forEach(student => {
+                        const score = parseInt(student[questionCols[i]], 10);
+                        studentTable += `<td class="${score === 0 ? 'wrong' : ''}" style="font-size:12px;">${isNaN(score) ? 'N/A' : score}</td>`;
                     });
                     studentTable += '</tr>';
                 });
+                // 在所有题目行渲染完后，增加一行显示每个学生的错题数量
+                studentTable += '<tr>';
+                studentTable += '<td colspan="4" style="font-weight:bold;text-align:right;">错题数量</td>';
+                data.forEach(student => {
+                    let wrongCount = 0;
+                    questionCols.forEach((q, idx) => {
+                        if (!q) return;
+                        const score = parseInt(student[q], 10);
+                        if (score === 0) wrongCount++;
+                    });
+                    studentTable += `<td style="color:#d9534f;font-weight:bold;">${wrongCount}</td>`;
+                });
+                studentTable += '</tr>';
                 studentTable += '</tbody></table>';
                 studentScoresContainer.innerHTML = studentTable;
-                
                 document.querySelectorAll('.question-label-input').forEach(input => {
                     input.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
@@ -303,9 +362,9 @@
                         }
                     });
                     input.addEventListener('change', () => {
-                         if(window._updateLabels) {
+                        if(window._updateLabels) {
                             window._updateLabels();
-                         }
+                        }
                     });
                 });
             }
@@ -537,10 +596,12 @@
             }
 
             const saveButtons = document.querySelectorAll('.save-btn');
-            
+            const hwTitleInput = document.getElementById('hw-title-input');
+            let originalTitleInputDisplay = hwTitleInput ? hwTitleInput.style.display : '';
+            if (hwTitleInput) hwTitleInput.style.display = 'none';
+
             // Hide save buttons temporarily
             saveButtons.forEach(btn => btn.style.display = 'none');
-            
             // Show loading message
             const loadingDiv = document.createElement('div');
             loadingDiv.id = 'loading-message';
@@ -552,28 +613,53 @@
             loadingDiv.textContent = 'Generating image... Please wait...';
             document.body.appendChild(loadingDiv);
 
+            // 新增：创建带白边的临时容器
+            const padding = 40; // 白边像素
+            const tempWrapper = document.createElement('div');
+            tempWrapper.style.background = '#fff';
+            tempWrapper.style.padding = padding + 'px';
+            tempWrapper.style.display = 'inline-block';
+            tempWrapper.style.boxSizing = 'content-box';
+            // 新增：插入标题
+            if (elementId === 'student-scores-section') {
+                const title = hwTitleInput?.value?.trim();
+                if (title) {
+                    const titleDiv = document.createElement('div');
+                    titleDiv.textContent = title;
+                    titleDiv.style.fontSize = '22px';
+                    titleDiv.style.fontWeight = 'bold';
+                    titleDiv.style.marginBottom = '18px';
+                    titleDiv.style.textAlign = 'center';
+                    tempWrapper.appendChild(titleDiv);
+                }
+            }
+            tempWrapper.appendChild(elementToCapture.cloneNode(true));
+            document.body.appendChild(tempWrapper);
+
             const options = {
                 allowTaint: true, useCORS: true, scale: 2, backgroundColor: '#ffffff',
-                width: elementToCapture.scrollWidth, height: elementToCapture.scrollHeight,
-                scrollX: 0, scrollY: 0, windowWidth: elementToCapture.scrollWidth,
-                windowHeight: elementToCapture.scrollHeight
+                width: tempWrapper.scrollWidth, height: tempWrapper.scrollHeight,
+                scrollX: 0, scrollY: 0, windowWidth: tempWrapper.scrollWidth,
+                windowHeight: tempWrapper.scrollHeight
             };
 
-            html2canvas(elementToCapture, options).then(function(canvas) {
+            html2canvas(tempWrapper, options).then(function(canvas) {
                 document.body.removeChild(loadingDiv);
+                document.body.removeChild(tempWrapper);
                 saveButtons.forEach(btn => btn.style.display = 'inline-block');
-                
+                if (hwTitleInput) hwTitleInput.style.display = originalTitleInputDisplay;
                 const link = document.createElement('a');
                 link.download = fileNamePrefix + new Date().toISOString().slice(0, 10) + '.png';
                 link.href = canvas.toDataURL('image/png');
-                
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             }).catch(function(error) {
                 console.error('Error generating image:', error);
                 document.body.removeChild(loadingDiv);
+                if (document.body.contains(tempWrapper)) document.body.removeChild(tempWrapper);
                 saveButtons.forEach(btn => btn.style.display = 'inline-block');
+                if (hwTitleInput) hwTitleInput.style.display = originalTitleInputDisplay;
                 alert('Error generating image. Please try again.');
             });
         }

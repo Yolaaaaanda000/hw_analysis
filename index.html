@@ -290,7 +290,7 @@
                 // 表头：题号、题目内容、标签、错题人数、学生姓名...
                 let studentTable = '<table style="table-layout:fixed;width:100%;"><colgroup>';
                 studentTable += '<col style="width:50px;">'; // 题号
-                studentTable += '<col style="width:160px;">'; // 题目内容
+                studentTable += '<col style="width:140px;">'; // 题目内容
                 studentTable += '<col style="width:50px;">'; // 标签
                 studentTable += '<col style="width:50px;">'; // 错题人数
                 studentNames.forEach(() => {
@@ -312,7 +312,7 @@
                     // 题目内容
                     let questionText = questionCols[i] ? String(questionCols[i]).slice(0, 30) : '';
                     let showEllipsis = questionCols[i] && String(questionCols[i]).length > 30;
-                    studentTable += `<td style="width:140px;max-width:160px;overflow:hidden;white-space:normal;word-break:break-all;font-size:16px;background:#fff;color:#333;">${questionText}${showEllipsis ? '…' : ''}</td>`;
+                    studentTable += `<td style="width:140px;max-width:140px;overflow:hidden;white-space:normal;word-break:break-all;font-size:12px;background:#fff;color:#333;">${questionText}${showEllipsis ? '…' : ''}</td>`;
                     // 标签
                     let tag = tags[i] ? `<div style="font-size:12px;color:#888;">${tags[i]}</div>` : '';
                     studentTable += `<td style="font-weight:normal;">${tag}</td>`;
